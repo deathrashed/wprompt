@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+
+const { spawnSync } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+const SCRIPT_DIR = __dirname;
+const BIN_DIR = path.join(SCRIPT_DIR, 'bin');
+
+const PROVIDERS = {
+  'brave': { file: 'prompt-brave-ai.js', name: 'Brave AI Search', aliases: ['brave-ai', 'bravesearch'] },
+  'chatgpt': { file: 'prompt-chatgpt.js', name: 'OpenAI ChatGPT', aliases: ['gpt', 'openai'] },
+  'claude': { file: 'prompt-claude.js', name: 'Anthropic Claude', aliases: ['anthropic'] },
+  'copilot': { file: 'prompt-copilot.js', name: 'Microsoft Copilot', aliases: ['bing', 'ms-copilot'] },
+  'ddg': { file: 'prompt-ddg.js', name: 'DuckDuckGo AI Chat', aliases: ['duckduckgo', 'ddg-ai'] },
+  'deepai': { file: 'prompt-deepai.js', name: 'DeepAI Chat', aliases: ['deepai-chat'] },
+  'deepseek': { file: 'prompt-deepseek.js', name: 'DeepSeek Chat', aliases: ['deepseek-ai'] },
+  'freegpt': { file: 'prompt-freegpt.js', name: 'FreeGPT', aliases: ['freegpt-tech'] },
+  'gemini': { file: 'prompt-gemini.js', name: 'Google Gemini', aliases: ['bard'] },
+  'google-ai': { file: 'prompt-google-ai.js', name: 'Google AI Search Mode', aliases: ['google', 'searchlabs'] },
+  'grok': { file: 'prompt-grok.js', name: 'xAI Grok', aliases: ['xai'] },
+  'huggingchat': { file: 'prompt-huggingchat.js', name: 'HuggingChat', aliases: ['hf', 'huggingface'] },
+  'lobehub': { file: 'prompt-lobehub.js', name: 'LobeHub AI', aliases: ['lobe'] },
+  'meta': { file: 'prompt-meta.js', name: 'Meta AI', aliases: ['meta-ai', 'llama'] },
+  'minimax': { file: 'prompt-minimax.js', name: 'MiniMax Agent', aliases: ['agent-minimax'] },
+  'mistral': { file: 'prompt-mistral.js', name: 'Mistral AI', aliases: ['mistral-chat'] },
+  'perplexity': { file: 'prompt-perplexity.js', name: 'Perplexity AI', aliases: ['pplx'] },
+  'poe': { file: 'prompt-poe.js', name: 'Quora Poe', aliases: ['quora-poe'] },
+  'qwen': { file: 'prompt-qwen.js', name: 'Alibaba Qwen', aliases: ['tongyi', 'qwen-ai'] },
+  'venice': { file: 'prompt-venice.js', name: 'Venice AI', aliases: ['venice-ai'] }
+};
+
+const ALIAS_MAP = {};
+Object.keys(PROVIDERS).forEach((key) => {
+  ALIAS_MAP[key] = key;
+  PROVIDERS[key].aliases.forEach((alias) => {
+    ALIAS_MAP[alias] = key;
+  });
+});
+
+function resolveProvider(input) {
+  const normalized = input.toLowerCase().trim();
+  return ALIAS_MAP[normalized] || null;
+}
+
+function printUsage() {
+  console.log(`
+\x1b[1mWPROMPT - Multi-Provider AI Automation CLI\x1b[0m
+
+\x1b[36mUsage:\x1b[0m
+  wprompt "<prompt>" --provider <provider_name>
+  wprompt "<prompt>" -p <provider_1>,<provider_2>
+  wprompt "<prompt>" --all
+  wprompt --list
+
+\x1b[36mOptions:\x1b[0m
+  -p, --provider <name>   Target provider(s) by name or alias (comma-separated).
+  -a, --all              Broadcast prompt to all 20 supported AI web platforms.
+  -l, --list             List all supported providers and their aliases.
+  -h, --help             Show this help menu.
+
+\x1b[36mExamples:\x1b[0m
+  wprompt "Explain quantum computing in 3 sentences" -p claude
+  wprompt "Compare React vs Vue" -p chatgpt,gemini,perplexity
+  wprompt "Write a quick Python HTTP server" --all
+`);
+}
+
+function printList() {
+  console.log(`\n\x1b[1mSupported Providers (${Object.keys(PROVIDERS).length} total):\x1b[0m\n`);
+  Object.keys(PROVIDERS).sort().forEach((key) => {
+    const p = PROVIDERS[key];
+    const aliasesStr = p.aliases.length > 0 ? ` [aliases: ${p.aliases.join(', ')}]` : '';
+    console.log(`  \x1b[32m${key.padEnd(14)}\x1b[0m - ${p.name}${aliasesStr}`);
+  });
+  console.log('');
+}
+
+const args = process.argv.slice(2);
+
+if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
+  printUsage();
+  process.exit(0);
+}
+
+if (args.includes('-l') || args.includes('--list')) {
+  printList();
+  process.exit(0);
+}
+
+let promptText = null;
+let selectedProviders = [];
+let runAll = false;
+
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+
+  if (arg === '-p' || arg === '--provider') {
+    const val = args[++i];
+    if (!val) {
+      console.error('\x1b[31mError:\x1b[0m Missing provider name after -p/--provider.');
+      process.exit(1);
+    }
+    const rawList = val.split(',');
+    rawList.forEach((raw) => {
+      const matchedKey = resolveProvider(raw);
+      if (matchedKey) {
+        if (!selectedProviders.includes(matchedKey)) selectedProviders.push(matchedKey);
+      } else {
+        console.error(`\x1b[31mError:\x1b[0m Unknown provider "${raw}". Run \`wprompt --list\` to view available options.`);
+        process.exit(1);
+      }
+    });
+  } else if (arg === '-a' || arg === '--all') {
+    runAll = true;
+  } else if (!arg.startsWith('-')) {
+    if (!promptText) {
+      promptText = arg;
+    } else {
+      promptText += ' ' + arg;
+    }
+  }
+}
+
+if (!promptText) {
+  console.error('\x1b[31mError:\x1b[0m No prompt text specified.');
+  printUsage();
+  process.exit(1);
+}
+
+if (runAll) {
+  selectedProviders = Object.keys(PROVIDERS);
+} else if (selectedProviders.length === 0) {
+  console.error('\x1b[31mError:\x1b[0m Please specify a provider using -p <name> or pass --all.');
+  printUsage();
+  process.exit(1);
+}
+
+console.log(`\x1b[36m🚀 Dispatching prompt to ${selectedProviders.length} provider(s)...\x1b[0m\n`);
+
+selectedProviders.forEach((key) => {
+  const p = PROVIDERS[key];
+  const scriptPath = path.join(SCRIPT_DIR, p.file);
+
+  if (!fs.existsSync(scriptPath)) {
+    console.error(`\x1b[31m✖ [${p.name}]\x1b[0m Script file missing: ${scriptPath}`);
+    return;
+  }
+
+  console.log(`\x1b[33m► Dispatching to [${p.name}]...\x1b[0m`);
+  const childEnv = {
+    ...process.env,
+    PATH: `${BIN_DIR}${path.delimiter}${process.env.PATH || ''}`
+  };
+  const result = spawnSync('node', [scriptPath, promptText], {
+    stdio: 'inherit',
+    env: childEnv
+  });
+
+  if (result.status === 0) {
+    console.log(`\x1b[32m✔ [${p.name}] Dispatched successfully.\x1b[0m\n`);
+  } else {
+    console.error(`\x1b[31m✖ [${p.name}] Failed with exit code ${result.status}.\x1b[0m\n`);
+  }
+});
